@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cheat Clip Pro Max</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2314202B'/%3E%3Crect x='9' y='5' width='14' height='22' rx='2' fill='%23F2C200'/%3E%3Cpath d='M9 16h14' stroke='%23D6352B' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css?v=1.1.0">
+</head>
+<body>
+<a class="skip" href="#source">Lewati ke form</a>
+
+<header class="top">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <h1>Cheat Clip <em>Pro Max</em></h1>
+  </div>
+  <p class="tagline" data-i18n="app.tagline"></p>
+  <div class="chips" id="chips" aria-live="polite"></div>
+  <nav class="nav" aria-label="Menu">
+    <button class="ghost" data-open="dlg-cookies" data-i18n="nav.cookies"></button>
+    <button class="ghost" data-open="dlg-storage" data-i18n="nav.storage"></button>
+    <button class="ghost" data-open="dlg-raw" data-i18n="nav.raw"></button>
+    <button class="ghost" data-open="dlg-settings" data-i18n="nav.settings"></button>
+    <div class="langsw" role="group" aria-label="Language">
+      <button id="lang-id" aria-pressed="true">ID</button><button id="lang-en" aria-pressed="false">EN</button>
+    </div>
+  </nav>
+</header>
+
+<div id="banners"></div>
+
+<main>
+  <section class="source" id="source" aria-label="Sumber video">
+    <div class="row url-row">
+      <label class="grow">
+        <span data-i18n="src.url"></span>
+        <input id="url" type="url" inputmode="url" autocomplete="off" spellcheck="false" data-i18n-ph="src.url.ph" list="url-history">
+        <datalist id="url-history"></datalist>
+      </label>
+      <button id="go" class="primary" data-i18n="src.go"></button>
+      <button id="stop" class="danger" hidden data-i18n="src.cancel"></button>
+    </div>
+    <div class="row opts">
+      <fieldset>
+        <legend data-i18n="src.length"></legend>
+        <div class="seg" id="preset-seg" role="radiogroup">
+          <button role="radio" data-v="short" data-i18n="src.short"></button>
+          <button role="radio" data-v="standard" aria-checked="true" data-i18n="src.standard"></button>
+          <button role="radio" data-v="extended" data-i18n="src.extended"></button>
+          <button role="radio" data-v="custom" data-i18n="src.custom"></button>
+        </div>
+      </fieldset>
+      <label class="custom-len" hidden><span data-i18n="src.min"></span><input id="minlen" type="number" min="3" max="600" value="20"></label>
+      <label class="custom-len" hidden><span data-i18n="src.max"></span><input id="maxlen" type="number" min="4" max="600" value="45"></label>
+      <label class="narrow"><span data-i18n="src.count"></span><input id="count" type="number" min="1" max="20" value="8"></label>
+      <label class="grow"><span data-i18n="src.focus"></span><input id="focus" type="text" maxlength="300" data-i18n-ph="src.focus.ph"></label>
+      <label class="narrow"><span data-i18n="src.lang"></span>
+        <select id="alang"><option value="auto" data-i18n="src.lang.auto"></option><option value="id">Indonesia</option><option value="en">English</option></select>
+      </label>
+      <label class="check"><input id="nocache" type="checkbox"><span data-i18n="src.nocache"></span></label>
+    </div>
+    <p id="progress-line" class="progress-line" hidden><progress id="ana-progress" max="100" value="0"></progress><span id="ana-msg"></span></p>
+    <p id="form-error" class="error" role="alert" hidden></p>
+  </section>
+
+  <section class="strip-wrap" id="strip-wrap" hidden aria-label="Retensi penonton">
+    <div class="strip-head">
+      <div><h2 id="video-title"></h2><p id="video-meta" class="muted"></p></div>
+      <p class="muted strip-hint" data-i18n="strip.hint"></p>
+    </div>
+    <div class="strip" id="strip"></div>
+    <div class="ruler" id="ruler" aria-hidden="true"></div>
+    <ul class="notes" id="notes"></ul>
+  </section>
+
+  <div class="workbench">
+    <section class="clips" aria-labelledby="clips-h">
+      <div class="clips-head">
+        <h2 id="clips-h" data-i18n="clips.title"></h2>
+        <div class="clips-actions">
+          <button class="ghost" id="sel-all" data-i18n="clips.all"></button>
+          <button class="ghost" id="sel-none" data-i18n="clips.none"></button>
+        </div>
+      </div>
+      <ol id="clip-list" class="clip-list"><li class="empty" data-i18n="clips.empty"></li></ol>
+      <div class="render-bar"><button id="render" class="primary wide" disabled></button></div>
+    </section>
+
+    <aside class="studio" id="studio" aria-labelledby="studio-h">
+      <h2 id="studio-h" data-i18n="studio.title"></h2>
+      <div id="studio-body"><p class="empty" data-i18n="studio.empty"></p></div>
+    </aside>
+  </div>
+
+  <section class="queue" id="queue" hidden aria-labelledby="queue-h">
+    <div class="queue-head">
+      <h2 id="queue-h" data-i18n="q.title"></h2>
+      <p id="queue-summary" class="muted"></p>
+      <div class="queue-actions">
+        <a class="btn" id="zip" data-i18n="q.all"></a>
+        <a class="btn ghost" id="csv" data-i18n="q.csv"></a>
+        <button class="danger ghost" id="cancel-batch" data-i18n="q.cancel"></button>
+      </div>
+    </div>
+    <progress id="queue-progress" max="100" value="0"></progress>
+    <ul id="queue-list" class="queue-list"></ul>
+  </section>
+</main>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<dialog id="dlg-settings">
+  <form method="dialog">
+    <h2 data-i18n="set.title"></h2>
+    <label><span data-i18n="set.key"></span><input id="apikey" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…"></label>
+    <p class="muted" data-i18n="set.key.help"></p>
+    <label class="check"><input id="remember" type="checkbox" checked><span data-i18n="set.remember"></span></label>
+    <div class="row"><button type="button" id="test-key" class="ghost" data-i18n="set.test"></button><span id="test-result" class="muted"></span></div>
+    <div class="row"><button type="button" id="update-ytdlp" class="ghost" data-i18n="set.update"></button><span id="update-result" class="muted"></span></div>
+    <p class="legal" data-i18n="set.legal"></p>
+    <div class="dlg-actions"><button class="primary" data-i18n="dlg.close"></button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-login">
+  <form id="login-form" method="dialog">
+    <h2 data-i18n="login.title"></h2>
+    <p class="muted" data-i18n="login.help"></p>
+    <label><span data-i18n="set.token"></span><input id="token" type="password" autocomplete="current-password"></label>
+    <p id="login-error" class="error" hidden></p>
+    <div class="dlg-actions"><button class="primary" data-i18n="set.login"></button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-cookies">
+  <form method="dialog">
+    <h2 data-i18n="ck.title"></h2>
+    <p class="muted" data-i18n="ck.help"></p>
+    <p id="ck-status" class="muted"></p>
+    <textarea id="ck-text" rows="7" spellcheck="false" placeholder="# Netscape HTTP Cookie File"></textarea>
+    <p id="ck-error" class="error" hidden></p>
+    <div class="dlg-actions">
+      <button type="button" id="ck-del" class="danger ghost" data-i18n="dlg.delete"></button>
+      <button type="button" id="ck-save" class="primary" data-i18n="dlg.save"></button>
+      <button class="ghost" data-i18n="dlg.close"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-storage">
+  <form method="dialog">
+    <h2 data-i18n="st.title"></h2>
+    <dl id="st-list" class="kv"></dl>
+    <div class="dlg-actions"><button type="button" id="st-clear" class="primary" data-i18n="st.clear"></button><button class="ghost" data-i18n="dlg.close"></button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-raw">
+  <form method="dialog">
+    <h2 data-i18n="raw.title"></h2>
+    <label><span data-i18n="raw.quality"></span>
+      <select id="raw-h"><option>1080</option><option>720</option><option>480</option><option>360</option></select></label>
+    <p id="raw-msg" class="muted"></p><progress id="raw-progress" max="100" value="0" hidden></progress>
+    <p id="raw-error" class="error" hidden></p>
+    <div class="dlg-actions"><a id="raw-link" class="btn" hidden data-i18n="raw.open"></a>
+      <button type="button" id="raw-go" class="primary" data-i18n="raw.go"></button><button class="ghost" data-i18n="dlg.close"></button></div>
+  </form>
+</dialog>
+
+<script type="module" src="js/app.js?v=1.1.0"></script>
+</body>
+</html>

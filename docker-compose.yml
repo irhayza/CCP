@@ -1,0 +1,17 @@
+services:
+  clip:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"     # hanya lokal. Ubah ke "8000:8000" bila memang ingin dibuka ke jaringan.
+    environment:
+      APP_TOKEN: ${APP_TOKEN:?Isi APP_TOKEN di file .env}
+      RENDER_WORKERS: ${RENDER_WORKERS:-2}
+    volumes:
+      - ./data:/app/data
+      - ./backend/fonts:/app/backend/fonts:ro
+    restart: unless-stopped
+    # GPU NVIDIA (butuh nvidia-container-toolkit + image ffmpeg yang mengaktifkan NVENC):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{driver: nvidia, count: 1, capabilities: [gpu, video]}]

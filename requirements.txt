@@ -1,0 +1,10 @@
+# Inti
+fastapi>=0.110
+uvicorn>=0.29
+pydantic>=2.5
+yt-dlp>=2025.1.1          # YouTube sering berubah: perbarui rutin (pip install -U yt-dlp)
+opencv-python-headless>=4.8,<5.0   # face tracking (Haar cascade bawaan, tanpa unduhan model)
+numpy>=1.24
+
+# Transkrip lokal AI bila video tak punya subtitle YouTube
+faster-whisper>=1.0

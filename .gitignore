@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+data/
+backend/fonts/*.ttf
+backend/fonts/*.otf
+.venv/
+node_modules/
+.pytest_cache/
+*.egg-info/
