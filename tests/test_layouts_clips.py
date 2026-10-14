@@ -14,7 +14,7 @@ class LayoutTests(unittest.TestCase):
             self.assertAlmostEqual(cw / ch, 9 / 16, delta=0.01)
 
     def test_every_mode_ends_with_vout(self):
-        for mode in ("fill_face", "fill_center", "letterbox", "split", "pip"):
+        for mode in ("fill_face", "fill_center", "letterbox", "split", "pip", "duo"):
             g = build_filtergraph(LayoutSpec(mode=mode), 1920, 1080, ass_file="captions.ass", fonts_dir="/f")
             self.assertTrue(g.endswith("[vout]"), mode)
             self.assertIn("ass=filename='captions.ass'", g)

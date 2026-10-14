@@ -5,7 +5,9 @@ from dataclasses import dataclass, field
 
 from .facetrack import x_expression
 
-MODES = ("fill_face", "fill_center", "letterbox", "split", "pip")
+MODES = ("fill_face", "fill_center", "letterbox", "split", "pip", "duo")
+# Pusat crop (fraksi lebar frame) tiap panel layout `duo` bila jalur wajah tidak tersedia.
+DUO_DEFAULT_CENTERS = (0.28, 0.72)
 ASPECTS = {"16:9": 16 / 9, "4:3": 4 / 3, "1:1": 1.0}
 CORNERS = ("tl", "tr", "bl", "br")
 
@@ -19,7 +21,9 @@ class LayoutSpec:
     game_fit: str = "cover"       # cover | contain  (bagian bawah pada mode split)
     pip_corner: str = "tr"
     pip_scale: float = 0.36
-    face_keys: list[tuple[float, float]] | None = field(default=None, repr=False)
+    seam_caption: bool = True     # mode duo: caption ditaruh di sambungan kedua panel (dipakai renderer, bukan filtergraph)
+    face_keys: list[tuple[float, float]] | None = field(default=None, repr=False)     # fill_face; duo: panel atas
+    face_keys_b: list[tuple[float, float]] | None = field(default=None, repr=False)   # duo: panel bawah
 
     def validate(self) -> "LayoutSpec":
         if self.mode not in MODES:
@@ -119,6 +123,24 @@ def build_filtergraph(spec: LayoutSpec, src_w: int, src_h: int, out_w: int = 108
         else:
             chains.append(f"[b]scale={out_w}:-2:flags=lanczos,pad={out_w}:{bot_h}:0:'({bot_h}-ih)/2':color=black,"
                           f"setsar=1[bot]")
+        chains.append("[top][bot]vstack=inputs=2[v0]")
+
+    elif spec.mode == "duo":
+        # Dua pembicara ditumpuk: pembicara kiri di panel atas, kanan di bawah. Tiap panel punya crop dan jalur
+        # kamera sendiri. Ide dari OpenShorts (MIT): tumpuk dua wajah dan taruh caption di sambungan.
+        top_h = even(out_h / 2)
+        bot_h = out_h - top_h
+        panes = []
+        for label, h_px, keys, default_c in (("top", top_h, spec.face_keys, DUO_DEFAULT_CENTERS[0]),
+                                             ("bot", bot_h, spec.face_keys_b, DUO_DEFAULT_CENTERS[1])):
+            pw, ph = cover_crop(src_w, src_h, out_w / h_px)
+            x = x_expression(keys if keys and pw < src_w else [(0.0, default_c), (1.0, default_c)], src_w, pw)
+            if pw >= src_w:
+                x = "0"
+            panes.append(f"crop=w={pw}:h={ph}:x='{x}':y='(ih-{ph})/2',scale={out_w}:{h_px}:flags=lanczos,setsar=1[{label}]")
+        chains.append("[0:v]split=2[a][b]")
+        chains.append(f"[a]{panes[0]}")
+        chains.append(f"[b]{panes[1]}")
         chains.append("[top][bot]vstack=inputs=2[v0]")
 
     else:  # pip

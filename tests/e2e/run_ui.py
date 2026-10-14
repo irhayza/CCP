@@ -40,6 +40,10 @@ def main() -> int:
         page.wait_for_timeout(900)                                   # biarkan animasi "developing" selesai
         page.screenshot(path=str(SHOTS / "02-hasil.png"), full_page=True)
         assert "Gemini" in page.inner_text("#notes")
+        chan = page.locator("#video-meta a.chan")                       # kanal sumber video: tautan aman ke YouTube
+        expect(chan).to_have_text("Chan")
+        assert chan.get_attribute("href") == "https://www.youtube.com/@chan"
+        assert chan.get_attribute("target") == "_blank" and "noopener" in chan.get_attribute("rel")
         first_score = int(page.locator(".clip .score").first.inner_text().split("\n")[0])
         assert first_score >= 90, first_score
         assert page.locator(".clip-title").first.input_value().startswith("Kesalahan terbesar")
@@ -53,12 +57,12 @@ def main() -> int:
 
         # Semua layout menghasilkan lapisan preview yang benar
         counts = {}
-        for mode in ("fill_center", "letterbox", "split", "pip", "fill_face"):
+        for mode in ("fill_center", "letterbox", "split", "pip", "duo", "fill_face"):
             page.click(f'[data-k="layout.mode"][data-v="{mode}"]')
             counts[mode] = page.locator("#phone .pv").count()
-            if mode in ("split", "pip", "letterbox"):
+            if mode in ("split", "pip", "letterbox", "duo"):
                 page.screenshot(path=str(SHOTS / f"04-layout-{mode}.png"), clip=page.locator(".stage").bounding_box())
-        assert counts == {"fill_center": 1, "letterbox": 2, "split": 2, "pip": 2, "fill_face": 1}, counts
+        assert counts == {"fill_center": 1, "letterbox": 2, "split": 2, "pip": 2, "duo": 2, "fill_face": 1}, counts
 
         # Caption & judul
         page.click('[data-k="captions.preset"][data-v="beast_punch"]')
@@ -95,7 +99,14 @@ def main() -> int:
         expect(page.locator("#queue")).to_be_visible(timeout=10_000)
         expect(page.locator("#queue-summary")).to_have_text("2 dari 2 selesai", timeout=180_000)
         expect(page.locator(".job.done")).to_have_count(2)
+        assert "{n}" not in page.inner_text("body"), "placeholder terjemahan belum terisi"      # mis. toast 'Render selesai'
         page.screenshot(path=str(SHOTS / "06-antrean.png"))
+        page.locator("#queue-list").scroll_into_view_if_needed()
+        page.screenshot(path=str(SHOTS / "06b-antrean-sumber.png"), clip=page.locator("#queue").bounding_box())
+        expect(page.locator(".job.done .job-source")).to_have_count(2)       # tiap klip jadi mencantumkan kanal sumbernya
+        expect(page.locator(".job.done .job-source").first).to_contain_text("Sumber:")
+        jl = page.locator(".job.done .job-source a.chan").first
+        assert jl.get_attribute("href") == "https://www.youtube.com/@chan" and "noopener" in jl.get_attribute("rel")
         zip_href = page.get_attribute("#zip", "href")
         r = ctx.request.get(base + zip_href)
         assert r.status == 200 and r.headers["content-type"] == "application/zip" and len(r.body()) > 10_000
@@ -109,6 +120,7 @@ def main() -> int:
         page.click("#lang-en")
         expect(page.locator("#go")).to_have_text("Analyze video")
         expect(page.locator("#queue-summary")).to_have_text("2 of 2 done")
+        expect(page.locator(".job.done .job-source").first).to_contain_text("Source:")
         page.click("text=Cookies")
         page.fill("#ck-text", "bukan cookies")
         page.click("#ck-save")

@@ -30,7 +30,13 @@ class ContractTests(unittest.TestCase):
             modes.add(opts.layout.mode)
             g = build_filtergraph(opts.layout, 1920, 1080, ass_file="c.ass", fonts_dir="/f")
             self.assertTrue(g.endswith("[vout]"))
-        self.assertEqual(modes, {"fill_face", "fill_center", "letterbox", "split", "pip"})
+        self.assertEqual(modes, {"fill_face", "fill_center", "letterbox", "split", "pip", "duo"})
+
+    def test_duo_default_centers_match_between_js_and_python(self):
+        from backend.layouts import DUO_DEFAULT_CENTERS
+        m = re.search(r"DUO_DEFAULT_CENTERS = \[([\d.]+),\s*([\d.]+)\]", (ROOT / "frontend/js/util.js").read_text())
+        self.assertTrue(m, "DUO_DEFAULT_CENTERS tidak ditemukan di util.js")
+        self.assertEqual((float(m.group(1)), float(m.group(2))), tuple(DUO_DEFAULT_CENTERS))
 
     def test_js_preset_and_option_values_exist_in_python(self):
         from backend.captions import FONTS, PRESETS

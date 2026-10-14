@@ -1,6 +1,6 @@
 import tempfile, unittest
 from pathlib import Path
-from backend.security import (InputError, parse_video_url, redact, safe_child, token_ok, valid_id,
+from backend.security import (InputError, parse_video_url, redact, safe_channel_url, safe_child, token_ok, valid_id,
                               validate_netscape_cookies)
 from backend.config import DEFAULT_ALLOWED_HOSTS as H
 
@@ -40,6 +40,33 @@ class PathTests(unittest.TestCase):
         self.assertEqual(valid_id("abc_DEF-123"), "abc_DEF-123")
         with self.assertRaises(InputError):
             valid_id("../etc")
+
+
+class ChannelUrlTests(unittest.TestCase):
+    """Tautan kanal berasal dari data video (pemilik kanal mengendalikannya): hanya https ke YouTube yang lolos."""
+
+    def test_real_channel_urls_pass(self):
+        for u in ("https://www.youtube.com/@nama", "https://youtube.com/channel/UCabcdefghijklmnopqrstuv",
+                  "https://m.youtube.com/@nama", "https://music.youtube.com/channel/UCx", "https://WWW.YouTube.com/c/Nama"):
+            self.assertEqual(safe_channel_url(u), u, u)
+
+    def test_surrounding_whitespace_is_trimmed(self):
+        self.assertEqual(safe_channel_url("  https://www.youtube.com/@a "), "https://www.youtube.com/@a")
+
+    def test_dangerous_or_foreign_urls_are_dropped(self):
+        bad = ("javascript:alert(1)", "data:text/html,<script>1</script>", "http://www.youtube.com/@a",
+               "//www.youtube.com/@a", "https://evil.com/@a", "https://youtube.com.evil.com/@a",
+               "https://www.youtube.com.evil.com/@a", "https://evil.com/?u=https://www.youtube.com/@a",
+               "https://user@www.youtube.com/@a", "https://user:pw@www.youtube.com/@a",
+               "https://www.youtube.com:8443/@a", "https://www.youtube.com/@a b", "https://www.youtube.com/@a\nX",
+               "https://www.youtube.com/@a\x00", "ftp://www.youtube.com/@a", "www.youtube.com/@a", "https://", "")
+        for u in bad:
+            self.assertEqual(safe_channel_url(u), "", repr(u))
+
+    def test_non_strings_and_oversized_values(self):
+        for v in (None, 5, [], {"a": 1}, b"https://www.youtube.com/@a"):
+            self.assertEqual(safe_channel_url(v), "", repr(v))
+        self.assertEqual(safe_channel_url("https://www.youtube.com/@" + "a" * 400), "")
 
 
 class MiscTests(unittest.TestCase):

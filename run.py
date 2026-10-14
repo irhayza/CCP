@@ -44,8 +44,12 @@ def main() -> int:
               "Isi APP_TOKEN di file .env (disarankan), atau set ALLOW_OPEN_SERVER=1 bila kamu benar-benar yakin.", file=sys.stderr)
         return 2
 
+    from backend.facetrack import find_yunet_model
+    if s.face_detector != "haar" and find_yunet_model(s.yunet_model or None, s.models_dir) is None:
+        print("Tip: face tracking lebih akurat dengan model YuNet (sekali pasang, ~230 KB):  python -m backend.models")
+
     import uvicorn
-    url = f"http://{'127.0.0.1' if s.host in ('0.0.0.0', '::') else s.host}:{s.port}"
+    url =f"http://{'127.0.0.1' if s.host in ('0.0.0.0', '::') else s.host}:{s.port}"
     if not args.no_browser and s.host in LOOPBACK:
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     print(f"Cheat Clip Pro Max berjalan di {url}  (Ctrl+C untuk berhenti)")

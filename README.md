@@ -36,11 +36,21 @@ Browser terbuka di `http://127.0.0.1:8000`. Lalu:
 
 Font caption: taruh file `.ttf` statis di `backend/fonts/` (lihat `README.txt` di sana). Tanpa itu ffmpeg memakai font sistem.
 
+### Face tracking lebih akurat: model YuNet (disarankan, opsional)
+
+Tanpa model, face tracking memakai Haar cascade bawaan OpenCV: tanpa unduhan, tetapi lemah pada wajah menyamping atau terhalang. Dengan YuNet (detektor CNN kecil dari [opencv_zoo](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet), lisensi MIT) deteksi jauh lebih stabil:
+
+```bash
+python -m backend.models          # unduh ~230 KB ke data/models, diverifikasi SHA-256 dan ukuran
+```
+
+Setelah terpasang, `FACE_DETECTOR=auto` (default) otomatis memakainya. Bila model hilang atau rusak, render tetap jalan dengan Haar dan memberi catatan. Perintahnya aman dijalankan berulang: file yang sudah benar tidak diunduh lagi, dan unduhan yang hash-nya tidak cocok tidak pernah dipasang. Tanpa internet, taruh sendiri `face_detection_yunet_2023mar.onnx` di `data/models/` atau tunjuk lewat `YUNET_MODEL`.
+
 ## Yang berbeda dari versi PRO
 
 | Area | Pro Max |
 |---|---|
-| Face tracking | Median filter, deadzone, batas kecepatan pan, dan *jump-cut* saat pergantian adegan. Hasil dipadatkan jadi beberapa keyframe (bukan gerak kamera bergetar). |
+| Face tracking | Detektor YuNet (opsional) atau Haar, median filter, deadzone, batas kecepatan pan, dan *jump-cut* di pergantian adegan yang sungguh terdeteksi (filter `scene` ffmpeg). Hasil dipadatkan jadi beberapa keyframe (bukan gerak kamera bergetar). |
 | Pemilihan klip | Skor AI digabung dengan retensi penonton, lalu dipotong di batas kalimat dan dibuang bila tumpang-tindih. Video 2–3 jam dipecah per jendela waktu. Tanpa AI tetap menghasilkan klip dari heatmap. |
 | Model Gemini | Daftar model diambil dari akunmu (bukan daftar tetap yang bisa basi), fallback otomatis saat kuota habis / model sibuk. |
 | Render | Antrean persisten (SQLite), progres real-time dari ffmpeg, bisa dibatalkan dan diulang, encoder GPU hanya dipakai bila *test-encode* nyata berhasil, jatuh ke CPU otomatis bila gagal di tengah. |
@@ -62,6 +72,8 @@ Salin `.env.example` ke `.env`. Semua opsional.
 | `GEMINI_MODELS` | Paksa urutan model; kosong = otomatis. |
 | `DATA_DIR` | Database, cache, hasil render, cookies (default `./data`). |
 | `YTDLP_PROXY`, `FFMPEG_BIN` | Proksi / lokasi ffmpeg khusus. |
+| `FACE_DETECTOR` | `auto` (default: YuNet bila modelnya terpasang, selain itu Haar), `yunet`, atau `haar`. |
+| `YUNET_MODEL` | Path file `.onnx` YuNet bila tidak di `DATA_DIR/models`. |
 | `WHISPER_MODEL`, `WHISPER_DEVICE` | Transkrip lokal (`pip install faster-whisper`) bila video tak punya subtitle. |
 
 ## Keamanan
@@ -123,7 +135,9 @@ backend/
   main.py               endpoint HTTP, auth, guard Host/Origin
   pipeline.py           alur analisis & render
   render.py             probe → face track → ASS → ffmpeg (progres, batal, fallback)
-  facetrack.py          deteksi + smoothing + ekspresi crop
+  facetrack.py          detektor (YuNet/Haar) + smoothing + ekspresi crop
+  scenes.py             deteksi pergantian adegan (filter scene ffmpeg)
+  models.py             pengunduh model opsional ber-checksum (python -m backend.models)
   layouts.py            filtergraph ffmpeg per layout
   captions.py           sanitasi, chunking, generator ASS
   clips.py              fusi skor, snapping, NMS, heuristik

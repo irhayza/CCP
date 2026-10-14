@@ -12,6 +12,7 @@ from typing import Callable
 
 from .config import Settings
 from .procutil import CommandError, run_streaming
+from .security import safe_channel_url
 
 Hooks = dict  # {"register": fn, "is_cancelled": fn}
 
@@ -88,6 +89,7 @@ class YtDlp:
             "title": raw.get("title") or "",
             "duration": float(raw.get("duration") or 0),
             "channel": raw.get("channel") or raw.get("uploader") or "",
+            "channel_url": safe_channel_url(raw.get("channel_url") or raw.get("uploader_url")),
             "thumbnail": raw.get("thumbnail") or "",
             "language": (raw.get("language") or "").split("-")[0],
             "description": (raw.get("description") or "")[:1200],

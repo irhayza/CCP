@@ -69,6 +69,46 @@ test('faceWindow tidak keluar frame', () => {
   assert.ok(Math.abs(U.faceWindow(0.5, 16 / 9, 9 / 16)[0] - (1 - 0.3156) / 2) < 0.005);
 });
 
+test('faceWindow: sumber lebih sempit dari panel tetap memotong atas/bawah (tidak melebar)', () => {
+  const [l, vy, vw, vh] = U.faceWindow(0.7, 1, 9 / 8);                       // sumber 1:1 ke panel 9:8
+  assert.equal(l, 0); assert.equal(vw, 1);
+  assert.ok(Math.abs(vh - 8 / 9) < 1e-9 && Math.abs(vy - (1 - 8 / 9) / 2) < 1e-9, `${vy} ${vh}`);
+  const [, vy2, , vh2] = U.faceWindow(0.5, 16 / 9, 9 / 16);                  // sumber lebar ke ponsel: tinggi penuh
+  assert.equal(vy2, 0); assert.ok(Math.abs(vh2 - 1) < 1e-9);
+});
+
+test('duoCenters: urut kiri->kanan, melengkapi wajah yang hilang dengan posisi bawaan', () => {
+  assert.deepEqual(U.DUO_DEFAULT_CENTERS, [0.28, 0.72]);
+  assert.deepEqual(U.duoCenters([0.3, 0.7]), [0.3, 0.7]);
+  assert.deepEqual(U.duoCenters([0.3, 0.7, 0.9]), [0.3, 0.7]);               // lebih dari dua: dua pertama
+  assert.deepEqual(U.duoCenters([0.2]), [0.2, 0.72]);                        // satu wajah di kiri -> panel atas
+  assert.deepEqual(U.duoCenters([0.8]), [0.28, 0.8]);                        // satu wajah di kanan -> panel bawah
+  assert.deepEqual(U.duoCenters([]), [0.28, 0.72]);
+  assert.deepEqual(U.duoCenters(null), [0.28, 0.72]);
+  assert.deepEqual(U.duoCenters([NaN, 'x']), [0.28, 0.72]);
+  const d = U.duoCenters(null); d[0] = 9; assert.equal(U.DUO_DEFAULT_CENTERS[0], 0.28);   // bawaan tidak ikut berubah
+});
+
+test('safeChannelUrl: hanya https ke YouTube', () => {
+  for (const u of ['https://www.youtube.com/@nama', 'https://youtube.com/channel/UCabc', 'https://m.youtube.com/@a', 'https://music.youtube.com/channel/UCx'])
+    assert.equal(U.safeChannelUrl(u), u);
+  for (const u of ['javascript:alert(1)', 'data:text/html,<b>', 'http://www.youtube.com/@a', '//www.youtube.com/@a', 'https://evil.com/@a',
+    'https://youtube.com.evil.com/@a', 'https://user@www.youtube.com/@a', 'https://user:pw@www.youtube.com/@a',
+    'https://www.youtube.com:8443/@a', 'www.youtube.com/@a', '', null, undefined, 5, {}])
+    assert.equal(U.safeChannelUrl(u), '', String(u));
+});
+
+test('channelHtml: tautan aman di tab baru, nama selalu di-escape', () => {
+  const ok = U.channelHtml('Kanal & Co', 'https://www.youtube.com/@kanal');
+  assert.match(ok, /^<a class="chan" href="https:\/\/www\.youtube\.com\/@kanal" target="_blank" rel="noopener noreferrer">Kanal &amp; Co<\/a>$/);
+  assert.equal(U.channelHtml('Kanal', 'javascript:alert(1)'), 'Kanal');           // URL tak aman -> teks biasa
+  assert.equal(U.channelHtml('Kanal', ''), 'Kanal');
+  assert.equal(U.channelHtml('', 'https://www.youtube.com/@kanal'), '');           // tanpa nama tak ada tautan kosong
+  const xss = U.channelHtml('<img src=x onerror=alert(1)>', 'https://www.youtube.com/@a"onmouseover="x');
+  assert.doesNotMatch(xss, /<img/); assert.doesNotMatch(xss, /"onmouseover/);
+  assert.match(xss, /&lt;img/);
+});
+
 test('i18n: kunci ID dan EN identik, tidak ada yang kosong', () => {
   const id = Object.keys(I.STRINGS.id).sort(), en = Object.keys(I.STRINGS.en).sort();
   assert.deepEqual(id, en);
@@ -96,7 +136,7 @@ test('i18n: semua kunci yang dipakai di HTML & JS ada kamusnya', () => {
 
 test('i18n: varian dinamis lengkap', () => {
   const k = new Set(Object.keys(I.STRINGS.id));
-  for (const v of ['fill_face', 'fill_center', 'letterbox', 'split', 'pip']) assert.ok(k.has(`lay.${v}`), v);
+  for (const v of ['fill_face', 'fill_center', 'letterbox', 'split', 'pip', 'duo']) assert.ok(k.has(`lay.${v}`), v);
   for (const v of ['blur', 'black', 'cover', 'contain']) assert.ok(k.has(`lay.${v}`), v);
   for (const v of ['auto', 'on', 'off']) assert.ok(k.has(`cap.upper.${v}`) && k.has(`out.enc.${v === 'on' ? 'gpu' : v === 'off' ? 'cpu' : 'auto'}`));
   for (const v of ['fast', 'balanced', 'high']) assert.ok(k.has(`out.q.${v}`));
@@ -141,6 +181,27 @@ test('previewLayers: tiap mode menghasilkan lapisan yang benar', () => {
   assert.match(letter, /height:56\.25%/);
 });
 
+test('previewLayers duo: dua panel ditumpuk, masing-masing mengikuti wajahnya', () => {
+  const s = S.mergeStyle({ layout: { mode: 'duo' } });
+  const html = S.previewLayers(s, 'blob:x', 16 / 9, 0.3, [0.4, 0.6]);
+  assert.equal((html.match(/<img/g) || []).length, 2);
+  assert.match(html, /top:0;height:50%/); assert.match(html, /bottom:0;height:50%/);
+  const lefts = [...html.matchAll(/<img[^>]*left:(-?[\d.]+)%/g)].map((m) => Number(m[1]));
+  assert.equal(lefts.length, 2);
+  assert.ok(lefts[0] > lefts[1], `atas (wajah kiri) harus lebih ke kiri daripada bawah: ${lefts}`);
+  const dflt = S.previewLayers(s, 'blob:x', 16 / 9, 0.3);                       // tanpa data wajah -> posisi bawaan, tetap dua panel
+  assert.equal((dflt.match(/<img/g) || []).length, 2);
+  assert.doesNotMatch(dflt, /undefined|NaN/);
+});
+
+test('previewOverlays duo: caption di sambungan kecuali opsinya dimatikan', () => {
+  const presets = { captions: {}, fonts: [] };
+  const topOf = (s) => Number(/pv-cap" style="top:([\d.]+)%/.exec(S.previewOverlays(s, presets, {}))[1]);
+  assert.equal(topOf(S.mergeStyle({ layout: { mode: 'duo' } })), 50);
+  assert.equal(topOf(S.mergeStyle({ layout: { mode: 'duo', duo_seam: false } })), 70);
+  assert.equal(topOf(S.mergeStyle({ layout: { mode: 'fill_face' } })), 70);     // mode lain tak terpengaruh
+});
+
 test('previewOverlays: judul dan caption di-escape', () => {
   const s = S.mergeStyle({ title: { enabled: true, source: 'custom', text: '<b>x</b>' } });
   const html = S.previewOverlays(s, { captions: {}, fonts: [] }, {});
@@ -155,6 +216,28 @@ test('queue helpers', () => {
   assert.equal(Q.captionText({ title: 'T', hook: 'H', hashtags: ['a', '#b'] }), 'T\n\nH\n\n#a #b');
 });
 
+test('buildApiStyle: seam_caption mengikuti opsi duo_seam (bawaan: aktif)', () => {
+  assert.equal(S.buildApiStyle(S.mergeStyle({ layout: { mode: 'duo' } })).layout.seam_caption, true);
+  assert.equal(S.buildApiStyle(S.mergeStyle({ layout: { mode: 'duo', duo_seam: false } })).layout.seam_caption, false);
+  assert.equal(S.buildApiStyle(S.mergeStyle({ layout: { mode: 'duo' } })).layout.mode, 'duo');
+  assert.ok(!('duo_seam' in S.buildApiStyle(S.mergeStyle(null)).layout));       // nama internal tak bocor ke API
+});
+
+test('renderQueue: kanal sumber tampil sebagai tautan aman, tak ada bila datanya kosong', () => {
+  const el = {};
+  const job = (result) => ({ id: 'j1', status: 'done', progress: 100, result: { file: 'a.mp4', title: 'T', ...result } });
+  Q.renderQueue({ listEl: el, jobs: [job({ source_channel: 'Kanal Uji', source_channel_url: 'https://www.youtube.com/@uji' })], titles: {} });
+  assert.match(el.innerHTML, /Sumber:/);
+  assert.match(el.innerHTML, /<a class="chan" href="https:\/\/www\.youtube\.com\/@uji" target="_blank" rel="noopener noreferrer">Kanal Uji<\/a>/);
+  Q.renderQueue({ listEl: el, jobs: [job({ source_channel: '<b>x</b>', source_channel_url: 'javascript:alert(1)' })], titles: {} });
+  assert.doesNotMatch(el.innerHTML, /<b>x/); assert.doesNotMatch(el.innerHTML, /javascript:/); assert.doesNotMatch(el.innerHTML, /<a class="chan"/);
+  assert.match(el.innerHTML, /&lt;b&gt;x/);
+  Q.renderQueue({ listEl: el, jobs: [job({})], titles: {} });
+  assert.doesNotMatch(el.innerHTML, /job-source/);
+  I.setLang('en'); Q.renderQueue({ listEl: el, jobs: [job({ source_channel: 'K' })], titles: {} }); I.setLang('id');
+  assert.match(el.innerHTML, /Source:/);
+});
+
 test('buildApiStyle -> JSON untuk kontrak Python', () => {
   const s = S.mergeStyle({ layout: { mode: 'split', camCorner: 'br', camSize: 0.25 }, resolution: '720',
     captions: { uppercase: 'off' }, title: { enabled: true, source: 'custom', text: 'Halo', duration: '0' } });
@@ -163,7 +246,7 @@ test('buildApiStyle -> JSON untuk kontrak Python', () => {
   assert.equal(api.layout.cam.length, 4); assert.ok(!('camCorner' in api.layout)); assert.ok(!('source' in api.title));
   if (process.env.EMIT_STYLES) {
     const out = [api];
-    for (const mode of ['fill_face', 'fill_center', 'letterbox', 'split', 'pip']) out.push(S.buildApiStyle(S.mergeStyle({ layout: { mode } })));
+    for (const mode of ['fill_face', 'fill_center', 'letterbox', 'split', 'pip', 'duo']) out.push(S.buildApiStyle(S.mergeStyle({ layout: { mode } })));
     out.push(S.buildApiStyle(S.mergeStyle(null)));
     process.stdout.write('\n@@STYLES@@' + JSON.stringify(out) + '@@END@@\n');
   }

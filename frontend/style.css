@@ -220,6 +220,9 @@ details[open] > summary::after { content: "−"; }
 .job-main { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .job-main strong { font: 700 1.1rem var(--display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .job-status { font-size: .85rem; color: var(--ink-2); }
+.job-source { font-size: .85rem; }
+.chan { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+.chan:hover, .chan:focus-visible { text-decoration-style: solid; }
 .job.failed .job-status { color: var(--grease); }
 .job.done .job-status { color: var(--ok); }
 .job-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }

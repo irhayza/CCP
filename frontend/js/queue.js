@@ -1,6 +1,6 @@
 import { t } from './i18n.js';
 import { api } from './api.js';
-import { esc, hashtagText } from './util.js';
+import { channelHtml, esc, hashtagText } from './util.js';
 
 const label = (stage, fallback) => {
   const k = `stage.${stage}`;
@@ -36,7 +36,8 @@ export function renderQueue({ listEl, jobs, titles }) {
       <div class="thumb">${r.thumbnail ? `<img alt="" src="${api.fileUrl(r.thumbnail)}">` : ''}</div>
       <div class="job-main"><strong>${esc(title)}</strong>
         ${active ? `<progress max="100" value="${j.progress || 0}"></progress>` : ''}
-        <span class="job-status">${esc(jobLine(j))}${(r.notes || []).map((n) => ` · ${esc(n)}`).join('')}</span></div>
+        <span class="job-status">${esc(jobLine(j))}${(r.notes || []).map((n) => ` · ${esc(n)}`).join('')}</span>
+        ${r.source_channel ? `<span class="job-source muted">${esc(t('q.source'))} ${channelHtml(r.source_channel, r.source_channel_url)}</span>` : ''}</div>
       <div class="job-actions">
         ${j.status === 'done' ? `<a class="btn primary" href="${api.fileUrl(r.file)}" download>${t('q.dl')}</a>
            <button type="button" data-act="copy">${t('q.copy')}</button>` : ''}

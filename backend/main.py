@@ -22,7 +22,7 @@ from . import gemini, hwenc
 from .captions import FONTS, PRESETS
 from .config import VERSION, Settings, load_settings
 from .db import Store, new_id
-from .facetrack import detect_face_in_image
+from .facetrack import analyze_image_faces, load_detector
 from .jobs import JobManager, public
 from .layouts import ASPECTS, CORNERS, MODES
 from .pipeline import (Services, clear_temp, options_from_style, purge_old, run_analysis, run_render, storage_info)
@@ -249,9 +249,16 @@ def create_app(settings: Settings | None = None, ytdlp: YtDlp | None = None) -> 
             if r.returncode != 0 or not out.is_file():
                 raise HTTPException(status_code=502, detail="Gagal mengambil frame.")
         headers = {"Cache-Control": "max-age=600"}
-        cx = detect_face_in_image(str(out))
+        try:
+            detector, _ = load_detector(settings.face_detector, model_path=settings.yunet_model or None,
+                                        models_dir=settings.models_dir)
+            cx, centers = analyze_image_faces(str(out), detector=detector)
+        except RuntimeError:
+            cx, centers = None, []
         if cx is not None:
             headers["X-Face-Center"] = f"{cx:.4f}"
+        if centers:                                       # hingga dua wajah, kiri -> kanan (preview layout dua pembicara)
+            headers["X-Face-Centers"] = ",".join(f"{c:.4f}" for c in centers)
         return FileResponse(out, media_type="image/jpeg", headers=headers)
 
     # ------------------------------------------------------------------ render
@@ -303,13 +310,20 @@ def create_app(settings: Settings | None = None, ytdlp: YtDlp | None = None) -> 
     def finished_results(batch_id: str) -> list[dict]:
         return [j["result"] for j in store.batch_jobs(valid_id(batch_id)) if j["status"] == "done" and j["result"]]
 
+    def csv_text(value) -> str:
+        """Nama kanal berasal dari pemilik video: awalan = + - @ akan dibaca Excel sebagai rumus, jadi dinetralkan."""
+        s = "" if value is None else str(value)
+        return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
     def pack_rows(results: list[dict]) -> str:
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["file", "title", "hook", "hashtags", "start_s", "end_s", "duration_s", "reason"])
+        w.writerow(["file", "title", "hook", "hashtags", "start_s", "end_s", "duration_s", "reason",
+                    "source_channel", "source_channel_url", "source_video_url"])
         for r in results:
             w.writerow([r.get("file"), r.get("title"), r.get("hook"), " ".join(f"#{t}" for t in r.get("hashtags", [])),
-                        r.get("start"), r.get("end"), r.get("duration"), r.get("reason")])
+                        r.get("start"), r.get("end"), r.get("duration"), r.get("reason"),
+                        csv_text(r.get("source_channel")), r.get("source_channel_url") or "", r.get("source_url") or ""])
         return buf.getvalue()
 
     @api.get("/publish-pack/{batch_id}")

@@ -7,15 +7,15 @@ import os
 import re
 import subprocess
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable
 
-from . import facetrack
+from . import facetrack, scenes
 from .captions import CaptionStyle, TitleSpec, Word, build_ass, build_srt
 from .hwenc import CPU, Encoder, pick_encoder
-from .layouts import LayoutSpec, build_filtergraph, cover_crop
-from .procutil import spawn
+from .layouts import LayoutSpec, build_filtergraph, cover_crop, even
+from .procutil import Cancelled, spawn
 
 ProgressCb = Callable[[str, float, str], None]   # (stage, persen 0..100, pesan)
 
@@ -130,10 +130,23 @@ def build_command(ffmpeg: str, source: str, out: str, graph: str, enc: Encoder, 
     return cmd
 
 
+def _scene_cuts(source: Path, ffmpeg: str, register, is_cancelled: Callable[[], bool]) -> list[float]:
+    """Waktu cut dari `scenes.detect_cuts`; pembatalan dipetakan ke RenderCancelled."""
+    try:
+        cuts = scenes.detect_cuts(str(source), ffmpeg=ffmpeg, register=register, is_cancelled=is_cancelled)
+    except Cancelled:
+        raise RenderCancelled() from None
+    if is_cancelled():
+        raise RenderCancelled()
+    return cuts
+
+
 def render_clip(source: str | Path, out_path: str | Path, opts: RenderOptions, words: list[Word],
                 workdir: str | Path, fonts_dir: str | Path, *, ffmpeg: str = "ffmpeg", ffprobe: str = "ffprobe",
                 on_progress: ProgressCb | None = None, is_cancelled: Callable[[], bool] = lambda: False,
-                register: Callable[[subprocess.Popen], None] | None = None) -> dict:
+                register: Callable[[subprocess.Popen], None] | None = None,
+                face_detector: str = "auto", yunet_model: str | None = None,
+                models_dir: str | Path | None = None) -> dict:
     cb: ProgressCb = on_progress or (lambda *_: None)
     workdir, out_path = Path(workdir).resolve(), Path(out_path).resolve()
     source = Path(source).resolve()
@@ -147,37 +160,82 @@ def render_clip(source: str | Path, out_path: str | Path, opts: RenderOptions, w
     out_h = out_w * 16 // 9
     notes: list[str] = []
 
-    # 1) face tracking
+    # 1) face tracking (Ikuti wajah: satu jalur; Dua pembicara: dua jalur, satu per panel)
+    layout = opts.layout
     face_keys = None
-    if opts.layout.mode == "fill_face":
+    if layout.mode in ("fill_face", "duo"):
         cb("tracking", 2, "Melacak wajah pembicara")
-        cw, _ = cover_crop(info.width, info.height, out_w / out_h)
+        duo = layout.mode == "duo"
+        pane_ar = out_w / even(out_h / 2) if duo else out_w / out_h              # panel layout duo: 9:8
+        cw, _ = cover_crop(info.width, info.height, pane_ar)
         if cw < info.width:
-            samples = facetrack.detect_faces(str(source), should_stop=is_cancelled)
-            if is_cancelled():
-                raise RenderCancelled()
-            found = sum(1 for s in samples if s)
-            if found >= max(2, len(samples) * 0.15):
-                dt = facetrack.sample_interval(samples, info.duration)
-                face_keys = facetrack.smooth_path(samples, info.duration, dt, cw / info.width)
-            else:
-                notes.append("Wajah tidak terdeteksi stabil; memakai crop tengah.")
-    opts.layout.face_keys = face_keys
+            try:
+                detector, det_note = facetrack.load_detector(face_detector, model_path=yunet_model or None,
+                                                             models_dir=models_dir)
+            except RuntimeError as e:            # tidak ada detektor yang bisa dimuat -> crop tengah (lihat bawah)
+                detector = None
+                det_note = (f"Detektor wajah tidak tersedia ({str(e).strip() or 'OpenCV tidak lengkap'}). "
+                            "Pasang model YuNet dengan: python -m backend.models")
+            if det_note:
+                notes.append(det_note)
 
-    # 2) caption
+            samples = None
+            if duo:
+                scan = facetrack.scan_faces(str(source), should_stop=is_cancelled, detector=detector)
+                if is_cancelled():
+                    raise RenderCancelled()
+                track_a, track_b, both = facetrack.split_two(scan)
+                if both >= max(2, len(scan) * 0.25):
+                    cuts = _scene_cuts(source, ffmpeg, register, is_cancelled)
+                    dt = facetrack.sample_interval(track_a, info.duration)
+                    frac = cw / info.width
+                    layout.face_keys = facetrack.smooth_path(track_a, info.duration, dt, frac, cuts=cuts)
+                    layout.face_keys_b = facetrack.smooth_path(track_b, info.duration, dt, frac, cuts=cuts)
+                    face_keys = layout.face_keys
+                else:
+                    # Kurang dari dua orang terlihat bersamaan: tumpukan dua panel akan menampilkan orang yang sama
+                    # dua kali. Pakai layout Ikuti wajah dengan hasil pindai yang sama (tanpa memindai ulang).
+                    notes.append("Dua wajah tidak terdeteksi stabil bersamaan; memakai layout Ikuti wajah.")
+                    layout = replace(layout, mode="fill_face", face_keys=None, face_keys_b=None)
+                    duo = False
+                    cw, _ = cover_crop(info.width, info.height, out_w / out_h)
+                    samples = facetrack.faces_from_scan(scan) if cw < info.width else None
+            else:
+                samples = facetrack.detect_faces(str(source), should_stop=is_cancelled, detector=detector)
+                if is_cancelled():
+                    raise RenderCancelled()
+
+            if samples is not None:
+                found = sum(1 for s in samples if s)
+                if found >= max(2, len(samples) * 0.15):
+                    cuts = _scene_cuts(source, ffmpeg, register, is_cancelled)
+                    dt = facetrack.sample_interval(samples, info.duration)
+                    face_keys = facetrack.smooth_path(samples, info.duration, dt, cw / info.width, cuts=cuts)
+                else:
+                    notes.append("Wajah tidak terdeteksi stabil; memakai crop tengah.")
+        elif duo:       # sumber (hampir) selebar panel, mis. video 1:1 atau potret: dua panel akan identik
+            notes.append("Video terlalu sempit untuk dua panel; memakai layout Ikuti wajah.")
+            layout = replace(layout, mode="fill_face", face_keys=None, face_keys_b=None)
+    if layout.mode != "duo":
+        layout.face_keys = face_keys
+
+    # 2) caption (layout duo: di sambungan kedua panel, kecuali dimatikan)
+    cap_style = opts.captions
+    if cap_style is not None and layout.mode == "duo" and layout.seam_caption:
+        cap_style = replace(cap_style, y_frac=0.5)
     ass_name = None
-    if opts.captions is not None or opts.title is not None:
+    if cap_style is not None or opts.title is not None:
         cb("captions", 12, "Menyusun caption")
         ass_name = "captions.ass"
         (workdir / ass_name).write_text(
-            build_ass(words if opts.captions is not None else [], info.duration,
-                      opts.captions or CaptionStyle(), opts.title), encoding="utf-8")
-        if opts.captions is not None and not words:
+            build_ass(words if cap_style is not None else [], info.duration,
+                      cap_style or CaptionStyle(), opts.title), encoding="utf-8")
+        if cap_style is not None and not words:
             notes.append("Transkrip tidak tersedia: klip dirender tanpa caption.")
     if opts.export_srt and words:
         out_path.with_suffix(".srt").write_text(build_srt(words), encoding="utf-8")
 
-    graph = build_filtergraph(opts.layout, info.width, info.height, out_w, out_h, ass_file=ass_name,
+    graph = build_filtergraph(layout, info.width, info.height, out_w, out_h, ass_file=ass_name,
                               fonts_dir=str(Path(fonts_dir).resolve()), max_fps=opts.max_fps, src_fps=info.fps)
 
     # 3) encode (GPU -> CPU fallback)

@@ -34,6 +34,11 @@ def _bool(v: str | None, default: bool = False) -> bool:
     return v.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _choice(v: str | None, allowed: tuple[str, ...], default: str) -> str:
+    v = (v or "").strip().lower()
+    return v if v in allowed else default
+
+
 def _int(v: str | None, default: int, lo: int, hi: int) -> int:
     try:
         n = int(v) if v not in (None, "") else default
@@ -62,6 +67,12 @@ class Settings:
     whisper_model: str
     whisper_device: str
     allow_self_update: bool
+    face_detector: str = "auto"      # auto | yunet | haar
+    yunet_model: str = ""            # path file .onnx YuNet; kosong = cari di DATA_DIR/models
+
+    @property
+    def models_dir(self) -> Path:
+        return self.data_dir / "models"
 
     @property
     def cache_dir(self) -> Path:
@@ -84,7 +95,7 @@ class Settings:
         return self.data_dir / "promax.db"
 
     def ensure_dirs(self) -> None:
-        for d in (self.data_dir, self.cache_dir, self.exports_dir, self.work_dir,
+        for d in (self.data_dir, self.cache_dir, self.exports_dir, self.work_dir, self.models_dir,
                   self.cache_dir / "slices", self.cache_dir / "transcripts",
                   self.cache_dir / "frames", self.cache_dir / "info", self.fonts_dir):
             d.mkdir(parents=True, exist_ok=True)
@@ -115,4 +126,6 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         whisper_model=g("WHISPER_MODEL") or "small",
         whisper_device=g("WHISPER_DEVICE") or "auto",
         allow_self_update=_bool(g("ALLOW_SELF_UPDATE")),
+        face_detector=_choice(g("FACE_DETECTOR"), ("auto", "yunet", "haar"), "auto"),
+        yunet_model=g("YUNET_MODEL") or "",
     )

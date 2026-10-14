@@ -1,9 +1,9 @@
 import { t } from './i18n.js';
 import { api } from './api.js';
-import { camRect, clamp, debounce, esc, faceWindow, fmtTime, imgStyleFor, visibleRect } from './util.js';
+import { camRect, clamp, debounce, duoCenters, esc, faceWindow, fmtTime, imgStyleFor, visibleRect } from './util.js';
 
 export const DEFAULT_STYLE = {
-  layout: { mode: 'fill_face', aspect: '16:9', backdrop: 'blur', camCorner: 'tl', camSize: 0.3, game_fit: 'cover', pip_corner: 'tr', pip_scale: 0.36 },
+  layout: { mode: 'fill_face', aspect: '16:9', backdrop: 'blur', camCorner: 'tl', camSize: 0.3, game_fit: 'cover', pip_corner: 'tr', pip_scale: 0.36, duo_seam: true },
   captions: { enabled: true, preset: 'viral_pop', font: 'Montserrat', size: 84, y_frac: 0.7, words_per_chunk: 3, uppercase: 'auto' },
   title: { enabled: false, source: 'hook', text: '', y_frac: 0.12, duration: 5, size: 66 },
   quality: 'balanced', resolution: 1080, encoder: 'auto', loudnorm: true, export_srt: false,
@@ -35,7 +35,7 @@ export function buildApiStyle(s) {
   const L = s.layout;
   return {
     layout: { mode: L.mode, aspect: L.aspect, backdrop: L.backdrop, cam: camRect(L.camCorner, L.camSize),
-              game_fit: L.game_fit, pip_corner: L.pip_corner, pip_scale: Number(L.pip_scale) },
+              game_fit: L.game_fit, pip_corner: L.pip_corner, pip_scale: Number(L.pip_scale), seam_caption: !!L.duo_seam },
     captions: { enabled: s.captions.enabled, preset: s.captions.preset, font: s.captions.font, size: Number(s.captions.size),
                 y_frac: Number(s.captions.y_frac), words_per_chunk: Number(s.captions.words_per_chunk),
                 uppercase: s.captions.uppercase === 'auto' ? null : s.captions.uppercase === 'on' },
@@ -53,7 +53,7 @@ export function overlayTitleFor(s, clip) {
 }
 
 /** HTML lapisan preview 9:16. Meniru crop backend (layouts.py) dengan rumus yang sama. */
-export function previewLayers(s, frameUrl, srcAR = 16 / 9, faceCx = 0.5) {
+export function previewLayers(s, frameUrl, srcAR = 16 / 9, faceCx = 0.5, faces = []) {
   const src = frameUrl || PLACEHOLDER;
   const img = (vr, extra = '') => `<img alt="" src="${esc(src)}" style="${imgStyleFor(vr)}${extra}">`;
   const full = [0, 0, 1, 1];
@@ -85,6 +85,11 @@ export function previewLayers(s, frameUrl, srcAR = 16 / 9, faceCx = 0.5) {
       return `<div class="pv" style="inset:0">${img(visibleRect(full, srcAR, PHONE_AR))}</div>` +
              `<div class="pv cam" style="${side};${vert};width:${w * 100}%;height:${h * 100}%">${img(visibleRect(cam, srcAR, camAR))}</div>`;
     }
+    case 'duo': {                       // dua pembicara ditumpuk; tiap panel 9:8 mengikuti satu wajah (kiri atas, kanan bawah)
+      const [a, b] = duoCenters(faces);
+      const pane = (c, edge) => `<div class="pv" style="left:0;right:0;${edge}:0;height:50%">${img(faceWindow(c, srcAR, PHONE_AR / 0.5))}</div>`;
+      return pane(a, 'top') + pane(b, 'bottom');
+    }
     default:
       return `<div class="pv" style="inset:0">${img(faceWindow(faceCx, srcAR, PHONE_AR))}</div>`;
   }
@@ -97,7 +102,8 @@ export function previewOverlays(s, presets, clip) {
     const p = presets?.captions?.[s.captions.preset] || { inactive: '#fff', active: '#ffe14d', outline: '#000', uppercase: true };
     const up = s.captions.uppercase === 'auto' ? p.uppercase : s.captions.uppercase === 'on';
     const words = ['ini', 'contoh', 'caption'].map((w) => (up ? w.toUpperCase() : w));
-    html += `<div class="pv-cap" style="top:${s.captions.y_frac * 100}%;font-size:${px(s.captions.size)};color:${p.inactive};` +
+    const capY = s.layout.mode === 'duo' && s.layout.duo_seam ? 0.5 : s.captions.y_frac;     // layout duo: caption di sambungan
+    html += `<div class="pv-cap" style="top:${capY * 100}%;font-size:${px(s.captions.size)};color:${p.inactive};` +
             `-webkit-text-stroke:${px(8)} ${p.outline}">${words[0]} <span style="color:${p.active}">${words[1]}</span> ${words[2]}</div>`;
   }
   const ttl = overlayTitleFor(s, clip || {});
@@ -128,7 +134,7 @@ export function createStudio({ root, presets, health, initial, onStyleChange }) 
   let style = mergeStyle(initial);
   let ctx = null;                         // { clip, video }
   let offset = 0;
-  let frame = { url: null, face: 0.5, ar: 16 / 9, state: 'idle', key: '' };
+  let frame = { url: null, face: 0.5, faces: [], ar: 16 / 9, state: 'idle', key: '' };
   const q = (sel) => root.querySelector(sel);
 
   function html() {
@@ -152,6 +158,7 @@ export function createStudio({ root, presets, health, initial, onStyleChange }) 
         ${field(t('lay.cam.size'), range('layout.camSize', 0.15, 0.6, 0.01), 'layout.mode=split|pip')}
         ${field(t('lay.pip.corner'), `<select data-k="layout.pip_corner">${corners.map((c) => `<option value="${c}">${t(`corner.${c}`)}</option>`).join('')}</select>`, 'layout.mode=pip')}
         ${field(t('lay.pip.size'), range('layout.pip_scale', 0.2, 0.55, 0.01), 'layout.mode=pip')}
+        <div data-when="layout.mode=duo">${check('layout.duo_seam', t('lay.duo.seam'))}</div>
       </div></details>
       <details open><summary>${t('studio.caption')}</summary><div class="fields">
         ${check('captions.enabled', t('cap.on'))}
@@ -198,7 +205,7 @@ export function createStudio({ root, presets, health, initial, onStyleChange }) 
   function paint() {
     const phone = q('#phone');
     if (!phone || !ctx) return;
-    const layers = previewLayers(style, frame.url, frame.ar, frame.face);
+    const layers = previewLayers(style, frame.url, frame.ar, frame.face, frame.faces);
     phone.innerHTML = layers + previewOverlays(style, presets, ctx.clip) +
       (frame.state === 'error' ? `<div class="pv-msg">${t('studio.noframe')}</div>` : frame.state === 'loading' ? `<div class="pv-msg">${t('studio.loading')}</div>` : '');
     const sv = q('#src-view');
@@ -221,13 +228,14 @@ export function createStudio({ root, presets, health, initial, onStyleChange }) 
       const res = await fetch(api.frameUrl(ctx.video.id, at), { credentials: 'same-origin' });
       if (!res.ok) throw new Error(String(res.status));
       const face = parseFloat(res.headers.get('X-Face-Center'));
+      const faces = (res.headers.get('X-Face-Centers') || '').split(',').map(parseFloat).filter(Number.isFinite);
       const blob = await res.blob();
       if (frame.key !== key) return;                       // sudah pindah posisi
       if (frame.url?.startsWith('blob:')) URL.revokeObjectURL(frame.url);
       const url = URL.createObjectURL(blob);
       const probe = new Image();
       await new Promise((ok, bad) => { probe.onload = ok; probe.onerror = bad; probe.src = url; });
-      frame = { url, face: Number.isFinite(face) ? face : 0.5, ar: probe.naturalWidth / probe.naturalHeight, state: 'ready', key };
+      frame = { url, face: Number.isFinite(face) ? face : 0.5, faces, ar: probe.naturalWidth / probe.naturalHeight, state: 'ready', key };
     } catch {
       if (frame.key === key) frame = { ...frame, url: null, state: 'error' };
     }
@@ -278,7 +286,7 @@ export function createStudio({ root, presets, health, initial, onStyleChange }) 
       const first = !ctx || ctx.video.id !== video.id;
       ctx = { clip, video };
       offset = Math.min(2, Math.max(0, (clip.end - clip.start) / 2));
-      if (first) frame = { url: null, face: 0.5, ar: 16 / 9, state: 'idle', key: '' };
+      if (first) frame = { url: null, face: 0.5, faces: [], ar: 16 / 9, state: 'idle', key: '' };
       mount();
       loadFrame();
     },

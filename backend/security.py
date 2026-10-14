@@ -47,6 +47,18 @@ def parse_video_url(url: str, allowed_hosts: tuple[str, ...]) -> tuple[str, str]
     return clean, "x" + hashlib.sha1(clean.encode()).hexdigest()[:10]
 
 
+def safe_channel_url(url: object) -> str:
+    """URL kanal YouTube yang aman dijadikan tautan, atau "" bila bukan. Nilainya datang dari data video
+    (bisa dikendalikan pemilik kanal), jadi hanya https ke host YouTube tanpa user-info/port/spasi yang lolos."""
+    if not isinstance(url, str) or not url or len(url) > 300:
+        return ""
+    u = url.strip()
+    if re.search(r"[\s\x00-\x1f\x7f]", u):
+        return ""
+    p = urlparse(u)
+    return u if p.scheme == "https" and p.netloc.lower() in _YT_HOSTS else ""
+
+
 def valid_id(value: str) -> str:
     if not isinstance(value, str) or not _SAFE_ID.match(value):
         raise InputError("ID tidak valid.")

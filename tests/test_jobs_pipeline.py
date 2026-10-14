@@ -6,7 +6,10 @@ from backend.db import Store
 from backend.jobs import JobManager
 from backend.pipeline import (clear_temp, options_from_style, run_analysis, run_render, slugify, storage_info)
 from backend.render import probe
+from backend.config import load_settings
+from backend.procutil import CommandError
 from backend.security import InputError
+from backend.ytdlp import YtDlp
 from tests.helpers import HAVE_FFMPEG, DummyCtx, FakeYtdlp, make_services
 
 P = {"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "video_id": "dQw4w9WgXcQ", "preset": "short",
@@ -268,6 +271,34 @@ class RenderPipelineTests(unittest.TestCase):
         ctx.cancelled = True
         self.assertEqual(run_render(svc, ctx, self.params()), {})
 
+    def test_result_credits_the_source_channel(self):
+        """Dengan caption (info sudah diambil untuk transkrip) maupun tanpa caption (info diambil khusus kredit)."""
+        for style in ({}, {"captions": {"enabled": False}, "title": {"enabled": False}}):
+            svc, s, store = self._svc(tmp=self.tmp / ("a" if style else "b"))
+            res = run_render(svc, DummyCtx(), self.params(**style))
+            self.assertEqual(res["source_channel"], "Chan", style)
+            self.assertEqual(res["source_channel_url"], "https://www.youtube.com/@chan", style)
+            self.assertEqual(res["source_url"], P["url"], style)
+
+    def test_failed_credit_lookup_never_fails_the_render(self):
+        for err in (CommandError("yt-dlp gagal", 1), OSError("disk"), ValueError("json rusak")):
+            fy = FakeYtdlp(self.tmp)
+            fy.info_error = err
+            svc, s, store = self._svc(tmp=self.tmp / type(err).__name__, ytdlp=fy)
+            res = run_render(svc, DummyCtx(), self.params(captions={"enabled": False}, title={"enabled": False}))
+            self.assertTrue((s.exports_dir / res["file"]).is_file(), err)
+            self.assertEqual((res["source_channel"], res["source_channel_url"]), ("", ""), err)
+            self.assertEqual(res["source_url"], P["url"])
+
+    def test_duo_layout_renders_end_to_end(self):
+        """Layout duo lewat pipeline penuh. Sumber uji tak berisi wajah, jadi harus jatuh ke Ikuti wajah dengan catatan,
+        bukan gagal, dan tetap menghasilkan 9:16 yang utuh."""
+        svc, s, store = self._svc()
+        res = run_render(svc, DummyCtx(), self.params(layout={"mode": "duo"}, captions={"enabled": False}, title={"enabled": False}))
+        info = probe(s.exports_dir / res["file"])
+        self.assertEqual((info.width, info.height), (720, 1280))
+        self.assertTrue(any("Ikuti wajah" in n or "Detektor wajah tidak tersedia" in n for n in res["notes"]), res["notes"])
+
     def test_bad_input_rejected_before_any_download(self):
         svc, s, store = self._svc()
         p = self.params()
@@ -277,6 +308,36 @@ class RenderPipelineTests(unittest.TestCase):
         with self.assertRaises(InputError):
             run_render(svc, DummyCtx(), self.params(layout={"mode": "wat"}))
         self.assertNotIn("section", svc.ytdlp.calls)
+
+
+class YtDlpInfoTests(unittest.TestCase):
+    """fetch_info menyalin kanal asal video dari keluaran yt-dlp; URL-nya disaring sebelum disimpan/ditampilkan."""
+
+    def info(self, **raw):
+        with tempfile.TemporaryDirectory() as d:
+            s = load_settings({"DATA_DIR": d})
+            (s.cache_dir / "info").mkdir(parents=True, exist_ok=True)
+            y = YtDlp(s)
+            base = {"id": "dQw4w9WgXcQ", "title": "T", "duration": 60}
+            with mock.patch.object(YtDlp, "_run", return_value=json.dumps({**base, **raw})):
+                return y.fetch_info("https://youtu.be/dQw4w9WgXcQ", "dQw4w9WgXcQ", ttl=0)
+
+    def test_channel_and_url_are_carried(self):
+        i = self.info(channel="Kanal Uji", channel_url="https://www.youtube.com/@kanaluji")
+        self.assertEqual((i["channel"], i["channel_url"]), ("Kanal Uji", "https://www.youtube.com/@kanaluji"))
+
+    def test_falls_back_to_uploader_fields(self):
+        i = self.info(uploader="Pengunggah", uploader_url="https://www.youtube.com/@peng")
+        self.assertEqual((i["channel"], i["channel_url"]), ("Pengunggah", "https://www.youtube.com/@peng"))
+
+    def test_unsafe_channel_url_is_dropped_but_name_kept(self):
+        for bad in ("javascript:alert(1)", "http://www.youtube.com/@x", "https://evil.example/@x"):
+            i = self.info(channel="Kanal", channel_url=bad)
+            self.assertEqual((i["channel"], i["channel_url"]), ("Kanal", ""), bad)
+
+    def test_missing_channel_fields(self):
+        i = self.info()
+        self.assertEqual((i["channel"], i["channel_url"]), ("", ""))
 
 
 class StyleAndStorageTests(unittest.TestCase):
@@ -290,6 +351,12 @@ class StyleAndStorageTests(unittest.TestCase):
                     {"captions": {"size": "besar"}}, {"layout": None, "title": 5}):
             with self.assertRaises(InputError):
                 options_from_style(bad)
+
+    def test_duo_layout_options(self):
+        o = options_from_style({"layout": {"mode": "duo"}})
+        self.assertEqual((o.layout.mode, o.layout.seam_caption), ("duo", True))               # caption di sambungan = bawaan
+        self.assertFalse(options_from_style({"layout": {"mode": "duo", "seam_caption": False}}).layout.seam_caption)
+        self.assertTrue(options_from_style({"layout": {"mode": "duo", "seam_caption": 1}}).layout.seam_caption)
 
     def test_slug(self):
         self.assertEqual(slugify("Halo, Dunia!! ../etc"), "halo-dunia-etc")

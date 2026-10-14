@@ -1,6 +1,7 @@
 """Eksekusi handler HTTP di backend/main.py memakai stub FastAPI (aktif hanya bila FastAPI asli tidak terpasang)."""
-import asyncio, os, stat, tempfile, time, unittest, zipfile
+import asyncio, csv, io, os, stat, tempfile, time, unittest, zipfile
 from pathlib import Path
+from unittest import mock
 
 from tests import fakeweb
 
@@ -15,6 +16,7 @@ if FAKE:
     from backend import main                       # noqa: E402
 
 URL = "https://youtu.be/dQw4w9WgXcQ"
+CANON = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 STYLE = {"layout": {"mode": "fill_center"}, "resolution": 720, "captions": {"enabled": False}, "quality": "fast"}
 
 
@@ -79,7 +81,7 @@ class ApiLogicTests(unittest.TestCase):
         self.assertTrue(h["ok"] and h["ffmpeg"] and not h["auth_required"])
         p = self.call("GET", "/api/presets")
         self.assertIn("viral_pop", p["captions"])
-        self.assertEqual(set(p["layouts"]), {"fill_face", "fill_center", "letterbox", "split", "pip"})
+        self.assertEqual(set(p["layouts"]), {"fill_face", "fill_center", "letterbox", "split", "pip", "duo"})
         with self.assertRaises(InputError):
             self.call("GET", "/api/models", None)
         with self.assertRaises(InputError):
@@ -137,6 +139,11 @@ class ApiLogicTests(unittest.TestCase):
             csv_text = zf.read("publish-pack.csv").decode("utf-8-sig")
         self.assertIn("Klip 1", csv_text)
         self.assertIn("#a", csv_text)
+        rows = list(csv.DictReader(io.StringIO(csv_text)))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["source_channel"], "Chan")                         # kredit kanal sumber ada di publish pack
+        self.assertEqual(rows[0]["source_channel_url"], "https://www.youtube.com/@chan")
+        self.assertEqual(rows[0]["source_video_url"], CANON)               # URL kanonik hasil validasi server
         z.background.run()
         self.assertFalse(Path(z.path).exists())                           # zip sementara dibersihkan
 
@@ -145,6 +152,31 @@ class ApiLogicTests(unittest.TestCase):
         self.assertIn("attachment", pack.headers["Content-Disposition"])
         stream = list(self.call("GET", "/api/batches/{batch_id}/events", res["batch_id"]).iterator)
         self.assertIn('"done"', stream[-1])
+
+    def test_publish_pack_neutralizes_spreadsheet_formulas_in_channel_name(self):
+        """Nama kanal dikendalikan pemilik video; di Excel awalan = + - @ akan dieksekusi sebagai rumus."""
+        self.fy.fail = False
+        for name in ("=HYPERLINK(\"http://x\",\"klik\")", "+1+1", "-2+3", "@SUM(A1)", "\tinjeksi", "Kanal Biasa"):
+            self.fy.channel = name
+            res = self.render(1)
+            self.wait_batch(res["batch_id"])
+            pack = self.call("GET", "/api/publish-pack/{batch_id}", res["batch_id"])
+            row = next(csv.DictReader(io.StringIO(pack.body.lstrip("\ufeff"))))
+            if name == "Kanal Biasa":
+                self.assertEqual(row["source_channel"], name)
+            else:
+                self.assertEqual(row["source_channel"], "'" + name, name)
+
+    def test_publish_pack_without_channel_info_has_empty_columns(self):
+        self.fy.fail = False
+        self.fy.info_error = main.CommandError("gagal", 1)
+        res = self.render(1)
+        b = self.wait_batch(res["batch_id"])
+        self.assertEqual((b["done"], b["total"]), (1, 1))                           # render tetap selesai
+        pack = self.call("GET", "/api/publish-pack/{batch_id}", res["batch_id"])
+        row = next(csv.DictReader(io.StringIO(pack.body.lstrip("\ufeff"))))
+        self.assertEqual((row["source_channel"], row["source_channel_url"]), ("", ""))
+        self.assertEqual(row["source_video_url"], CANON)
 
     def test_render_validation_happens_before_queueing(self):
         for style, clip in ((dict(layout={"mode": "wat"}), dict(start=0, end=10)), ({}, dict(start=0, end=9999)),
@@ -180,6 +212,23 @@ class ApiLogicTests(unittest.TestCase):
             self.call("GET", "/api/clip-frame", "../../x", 1.0)
         with self.assertRaises(InputError):
             self.call("GET", "/api/clip-frame", "short", 1.0)
+
+    def test_preview_frame_reports_face_centers_for_duo_preview(self):
+        """Header X-Face-Center (satu wajah) dan X-Face-Centers (hingga dua wajah, kiri->kanan) untuk preview studio."""
+        with mock.patch.object(main, "load_detector", return_value=(object(), "")), \
+                mock.patch.object(main, "analyze_image_faces", return_value=(0.2, [0.2, 0.8])):
+            r = self.call("GET", "/api/clip-frame", "dQw4w9WgXcQ", 1.0)
+        self.assertEqual(r.headers["X-Face-Center"], "0.2000")
+        self.assertEqual(r.headers["X-Face-Centers"], "0.2000,0.8000")
+        with mock.patch.object(main, "load_detector", return_value=(object(), "")), \
+                mock.patch.object(main, "analyze_image_faces", return_value=(None, [])):
+            r = self.call("GET", "/api/clip-frame", "dQw4w9WgXcQ", 1.0)
+        self.assertNotIn("X-Face-Center", r.headers)                      # tanpa wajah: tak ada header (frontend pakai bawaan)
+        self.assertNotIn("X-Face-Centers", r.headers)
+        with mock.patch.object(main, "load_detector", side_effect=RuntimeError("tidak ada detektor")):
+            r = self.call("GET", "/api/clip-frame", "dQw4w9WgXcQ", 1.0)
+        self.assertEqual(r.media_type, "image/jpeg")                      # detektor hilang tidak boleh menggagalkan preview
+        self.assertNotIn("X-Face-Centers", r.headers)
 
     # ------------------------------------------------------------------ cookies, storage
     def test_cookies_lifecycle_and_permissions(self):

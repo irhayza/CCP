@@ -20,6 +20,26 @@ export function fmtBytes(n) {
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ESC[c]);
 
+const YT_HOSTS = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'];
+
+/** URL kanal yang aman dijadikan href: hanya https ke host YouTube (tanpa user-info/port). Selain itu ''. */
+export function safeChannelUrl(u) {
+  try {
+    const url = new URL(String(u || ''));
+    const ok = url.protocol === 'https:' && !url.username && !url.password && !url.port && YT_HOSTS.includes(url.hostname);
+    return ok ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
+/** HTML nama kanal sumber: tautan (tab baru) bila URL-nya aman, teks biasa bila tidak. Nama selalu di-escape. */
+export function channelHtml(name, url) {
+  const n = esc(name || '');
+  const href = safeChannelUrl(url);
+  return href && n ? `<a class="chan" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${n}</a>` : n;
+}
+
 export function debounce(fn, ms) {
   let t;
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
@@ -65,9 +85,20 @@ export function visibleRect(rect, srcAR, boxAR) {
 
 /** Geser jendela crop agar berpusat di `cx` (0..1) tanpa keluar frame. Dipakai preview face-tracking. */
 export function faceWindow(cx, srcAR, boxAR) {
-  const [, , vw] = visibleRect([0, 0, 1, 1], srcAR, boxAR);
+  const [, vy, vw, vh] = visibleRect([0, 0, 1, 1], srcAR, boxAR);
   const left = clamp(cx - vw / 2, 0, 1 - vw);
-  return [left, 0, vw, 1];
+  return [left, vy, vw, vh];
+}
+
+// Pusat crop tiap panel layout dua pembicara bila wajah tak terdeteksi. Harus sama dengan layouts.DUO_DEFAULT_CENTERS.
+export const DUO_DEFAULT_CENTERS = [0.28, 0.72];
+
+/** Pusat [atas, bawah] untuk preview dua pembicara dari hasil deteksi (urut kiri->kanan, 0..2 wajah). */
+export function duoCenters(faces) {
+  const f = (faces || []).filter(Number.isFinite);
+  if (f.length >= 2) return [f[0], f[1]];
+  if (f.length === 1) return f[0] < 0.5 ? [f[0], DUO_DEFAULT_CENTERS[1]] : [DUO_DEFAULT_CENTERS[0], f[0]];
+  return [...DUO_DEFAULT_CENTERS];
 }
 
 /** Style CSS (string) untuk <img> absolut agar hanya sub-area `vr` yang terlihat di wadahnya. */

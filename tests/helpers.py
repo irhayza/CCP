@@ -33,10 +33,15 @@ class FakeYtdlp:
         self.heat = [{"start_time": i * duration / 100, "end_time": (i + 1) * duration / 100,
                       "value": 1.0 if 48 <= i <= 56 else 0.2 + 0.2 * (i % 3) / 3} for i in range(100)] if heatmap else []
         self.calls = []
+        self.channel, self.channel_url = "Chan", "https://www.youtube.com/@chan"
+        self.info_error = None          # exception yang dilempar fetch_info (uji kegagalan kredit sumber)
 
     def fetch_info(self, url, vid, hooks=None, ttl=0):
         self.calls.append("info")
-        return {"id": vid, "title": "Video Uji", "duration": float(self.duration), "channel": "Chan", "thumbnail": "",
+        if self.info_error:
+            raise self.info_error
+        return {"id": vid, "title": "Video Uji", "duration": float(self.duration), "channel": self.channel,
+                "channel_url": self.channel_url, "thumbnail": "",
                 "language": "id", "description": "", "heatmap": self.heat, "chapters": [], "is_live": False, "url": url}
 
     def fetch_subtitles(self, url, vid, langs, out_dir, hooks=None):

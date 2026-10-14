@@ -17,6 +17,7 @@ from .config import Settings
 from .db import Store
 from .jobs import JobContext
 from .layouts import LayoutSpec
+from .procutil import CommandError
 from .render import RenderOptions, render_clip
 from .security import InputError
 from .transcript import (make_segments, load_words, whisper_available, whisper_words, words_from_json,
@@ -143,7 +144,7 @@ def run_analysis(svc: Services, ctx: JobContext, p: dict, api_key: str) -> dict:
 
     result = {
         "video": {"id": vid, "url": url, "title": info["title"], "channel": info.get("channel", ""),
-                  "duration": duration, "thumbnail": info.get("thumbnail", "")},
+                  "channel_url": info.get("channel_url", ""), "duration": duration, "thumbnail": info.get("thumbnail", "")},
         "heatmap": heatmap,
         "moments": [dict(m.to_dict(), id=f"c{i}") for i, m in enumerate(moments, 1)],
         "meta": {"mode": mode, "transcript": tsource, "models": models_used, "notes": notes,
@@ -171,7 +172,8 @@ def _options_from_style(style: dict, overlay_title: str) -> RenderOptions:
     layout = LayoutSpec(mode=lay.get("mode", "fill_face"), aspect=lay.get("aspect", "16:9"),
                         backdrop=lay.get("backdrop", "blur"), cam=tuple(float(x) for x in cam),  # type: ignore[arg-type]
                         game_fit=lay.get("game_fit", "cover"), pip_corner=lay.get("pip_corner", "tr"),
-                        pip_scale=float(lay.get("pip_scale", 0.36))).validate()
+                        pip_scale=float(lay.get("pip_scale", 0.36)),
+                        seam_caption=bool(lay.get("seam_caption", True))).validate()
     cap = style.get("captions") or {}
     captions = None
     if cap.get("enabled", True):
@@ -228,6 +230,8 @@ def run_render(svc: Services, ctx: JobContext, p: dict) -> dict:
         words = words_in_range(allw, start, end)
         if not words and tsource == "none" and whisper_available():
             words = whisper_words(str(src), svc.settings.whisper_model, svc.settings.whisper_device, None)
+    else:
+        info = _info_for_credit(svc, url, vid, ctx)
 
     name = f"{p['batch_id']}_{p['index']:02d}_{slugify(clip.get('title', ''), clip.get('id', 'klip'))}.mp4"
     out = svc.settings.exports_dir / name
@@ -236,13 +240,26 @@ def run_render(svc: Services, ctx: JobContext, p: dict) -> dict:
         res = render_clip(src, out, opts, words, work, svc.settings.fonts_dir, ffmpeg=svc.settings.ffmpeg_bin,
                           ffprobe=svc.settings.ffprobe_bin,
                           on_progress=lambda stage, pct, msg: ctx.progress(36 + 0.64 * pct, stage, msg),
-                          is_cancelled=ctx.is_cancelled, register=ctx.register)
+                          is_cancelled=ctx.is_cancelled, register=ctx.register,
+                          face_detector=svc.settings.face_detector,
+                          yunet_model=svc.settings.yunet_model or None, models_dir=svc.settings.models_dir)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     res.update({"title": clip.get("title", ""), "hook": clip.get("hook", ""), "hashtags": clip.get("hashtags", []),
                 "reason": clip.get("reason", ""), "start": start, "end": end, "clip_id": clip.get("id"),
-                "caption_words": len(words)})
+                "caption_words": len(words),
+                # kredit sumber: kanal asal video, dari data yt-dlp (bukan dari klien)
+                "source_channel": info.get("channel", ""), "source_channel_url": info.get("channel_url", ""),
+                "source_url": url})
     return res
+
+
+def _info_for_credit(svc: Services, url: str, vid: str, ctx: JobContext) -> dict:
+    """Info video hanya untuk kredit sumber; gagal mengambilnya tidak boleh menggagalkan render."""
+    try:
+        return svc.ytdlp.fetch_info(url, vid, ctx.hooks)
+    except (CommandError, OSError, ValueError):
+        return {}
 
 
 # --------------------------------------------------------------------------- penyimpanan

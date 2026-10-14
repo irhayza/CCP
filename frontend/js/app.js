@@ -3,7 +3,7 @@ import { getLang, setLang, t } from './i18n.js';
 import { captionText, jobLine, renderQueue, summarize } from './queue.js';
 import { renderStrip } from './strip.js';
 import { buildApiStyle, createStudio, overlayTitleFor } from './studio.js';
-import { clamp, esc, fmt1, fmtBytes, fmtTime, scoreTier } from './util.js';
+import { channelHtml, clamp, esc, fmt1, fmtBytes, fmtTime, scoreTier } from './util.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -153,7 +153,7 @@ function loadResult(r) {
   pushHistory(r.video?.url || $('#url').value.trim());
   $('#strip-wrap').hidden = false;
   $('#video-title').textContent = r.video.title;
-  $('#video-meta').textContent = `${r.video.channel} · ${fmtTime(r.video.duration)}`;
+  $('#video-meta').innerHTML = `${channelHtml(r.video.channel, r.video.channel_url)} · ${esc(fmtTime(r.video.duration))}`;
   drawStrip(true); renderNotes(); renderClips(); renderRenderButton();
   if (state.activeId) activate(state.activeId, false);
   $('#strip-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -301,8 +301,8 @@ function paintQueue(jobs) {
   renderQueue({ listEl: $('#queue-list'), jobs, titles: state.batch?.titles || {} });
   if (s.done === jobs.length && s.done > 0 && !paintQueue._notified) {
     paintQueue._notified = true;
-    notif.send(t('q.done', { d: s.done, n: s.total }), t('toast.render.done'));
-    toast(t('toast.render.done'));
+    notif.send(t('q.done', { d: s.done, n: s.total }), t('toast.render.done', { n: s.done }));
+    toast(t('toast.render.done', { n: s.done }));
   }
   if (s.done < jobs.length) paintQueue._notified = false;
 }
