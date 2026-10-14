@@ -27,9 +27,9 @@ Konsekuensinya:
 | 6 | Backend memakai `cookies.txt`, `exports/`, `temp/` **di dalam** folder `backend/` | Terkonfirmasi (README, struktur proyek) | Data pengguna bercampur dengan kode; `cookies.txt` (sesi login Google!) mudah ikut ter-commit. Isi `.gitignore` tidak bisa saya lihat. | Semua data di `DATA_DIR` (default `./data`, di-ignore), cookies `chmod 600`, API tidak pernah mengembalikan nilai cookie. |
 | 7 | Tidak ada penyebutan autentikasi, CORS, atau pembatasan host | Dugaan | Bila server dijalankan di `0.0.0.0`/VPS, siapa pun bisa memakai cookies dan merender di mesinmu. Server lokal pun rentan terhadap situs jahat yang menembak `localhost` (CSRF / DNS rebinding). | Bind default `127.0.0.1`; guard Host+Origin; `APP_TOKEN` dengan cookie `httpOnly`; `run.py` menolak bind jaringan tanpa token. |
 | 8 | Endpoint `/api/analyze` berupa satu aliran SSE | Dugaan | Reload halaman atau koneksi putus = analisis hilang dan harus mengulang (dan membayar kuota Gemini lagi). | Job persisten di SQLite; SSE hanya "jendela" ke job; hasil dicache 24 jam. |
-| 9 | "Face tracking keeps speaker centered" tanpa penjelasan smoothing | Dugaan | Implementasi naif (crop mengikuti deteksi mentah) menghasilkan kamera bergetar dan melompat saat satu deteksi salah. | `smooth_path`: median 3-sampel, deadzone, batas kecepatan, jump-cut saat adegan berganti, keyframe lewat RDP. Satu bug nyata (deteksi liar lolos filter) ditemukan dan diperbaiki lewat test saat membangunnya (lihat §5). |
-| 10 | "OpenCV / MediaPipe" disebut bersamaan | Dugaan | Dua jalur deteksi berarti dua perilaku; MediaPipe menambah dependensi besar. | Satu jalur: Haar cascade bawaan OpenCV (tanpa unduh model). Lebih sederhana, tetapi kurang akurat untuk wajah menyamping; lihat §6. |
-| 11 | Di root repo tidak tampak folder tes, workflow CI, maupun Dockerfile (hanya konfigurasi ESLint/TypeScript); isi `backend/` tidak bisa saya lihat | Terkonfirmasi untuk root, dugaan untuk `backend/` | Regresi sulit terdeteksi, terutama pada filtergraph ffmpeg yang sensitif. | 106 test Python, 19 test Node, skrip UI E2E, workflow CI, Dockerfile. |
+| 9 | "Face tracking keeps speaker centered" tanpa penjelasan smoothing | Dugaan | Implementasi naif (crop mengikuti deteksi mentah) menghasilkan kamera bergetar dan melompat saat satu deteksi salah. | `smooth_path`: median 3-sampel, deadzone, batas kecepatan, jump-cut di pergantian adegan yang sungguh terdeteksi (`scenes.py`), kamera diam bila wajah nyaris tak bergerak dalam satu adegan, keyframe lewat RDP. Satu bug nyata (deteksi liar lolos filter) ditemukan dan diperbaiki lewat test saat membangunnya (lihat §5). Ide diam-vs-mengikuti dan batas adegan berasal dari AutoFlip dan PySceneDetect; lihat [`REFERENCES.md`](REFERENCES.md). |
+| 10 | "OpenCV / MediaPipe" disebut bersamaan | Dugaan | Dua jalur deteksi berarti dua perilaku; MediaPipe menambah dependensi besar. | Satu jalur deteksi dengan dua detektor yang bisa dipertukarkan: **YuNet** (opsional, model ±230 KB, `python -m backend.models`) atau Haar cascade OpenCV 4.x. MediaPipe tidak dipakai. **Catatan:** OpenCV 5.x tidak punya `CascadeClassifier`, jadi tanpa model YuNet detektor wajah tidak ada di sana; `requirements.txt` mematok OpenCV <5 dan renderer memberi catatan yang menunjuk perintah pemasangan model, lalu memakai crop tengah. |
+| 11 | Di root repo tidak tampak folder tes, workflow CI, maupun Dockerfile (hanya konfigurasi ESLint/TypeScript); isi `backend/` tidak bisa saya lihat | Terkonfirmasi untuk root, dugaan untuk `backend/` | Regresi sulit terdeteksi, terutama pada filtergraph ffmpeg yang sensitif. | 217 test Python, 27 test Node, skrip UI E2E, workflow CI, Dockerfile. |
 | 12 | Tidak ada pengingat soal hak cipta / ToS YouTube | Terkonfirmasi (README) | Tool ini mengunduh dan mengunggah ulang konten; pengguna perlu tahu risikonya. | Catatan hukum di README dan di dialog Pengaturan; allowlist host. |
 
 ## 3. Pemetaan fitur
@@ -41,6 +41,8 @@ Konsekuensinya:
 | Studio 9:16 live | Preview memakai matematika crop yang sama dengan backend (diuji silang JS↔Python); frame asli lewat `/api/clip-frame` + posisi wajah |
 | Face tracking | Lihat #9 |
 | Split / PIP streamer | Ada; area kamera dipilih lewat pojok + ukuran, dengan tampilan sumber yang menandai area |
+| (tambahan) Dua pembicara | Layout `duo`: dua panel 9:8 ditumpuk, tiap orang punya jalur kamera sendiri, caption di sambungan; jatuh ke Ikuti wajah bila dua wajah tak stabil terlihat bersamaan |
+| (tambahan) Kredit sumber | Kanal YouTube asal video tampil di header, antrean, dan kolom `source_channel*` di paket publikasi |
 | Karaoke ASS, 7 preset | 10 preset, satu event per kata (tidak bergantung semantik `\k`), baris dipecah otomatis |
 | Sanitasi caption | Tag di dalam `[]`, `()`, `{}`, `♪`, juga yang terpecah beberapa token; escape ASS dinetralkan |
 | NVENC + fallback CPU | Deteksi dengan test-encode nyata; fallback otomatis di tengah render bila encoder gagal |
@@ -54,7 +56,7 @@ Konsekuensinya:
 
 - **Frontend tanpa build (ES modules), bukan React/Vite.** Saya tidak bisa membaca komponen React asli, dan lingkungan penyusunan tidak punya akses npm untuk menguji build TypeScript. UI tanpa build bisa saya jalankan dan uji di Chromium sungguhan, serta menghilangkan kebutuhan Node untuk pengguna. Bila kamu ingin tetap di React, kontrak API di README cukup untuk menyambungkannya.
 - **REST murni ke Gemini, bukan SDK `google-genai`.** Lebih sedikit dependensi, dan mudah diuji dengan HTTP palsu. Konsekuensinya, bila Google mengubah format respons, perubahan ada di satu file (`gemini.py`).
-- **Haar cascade, bukan MediaPipe.** Alasan di #10.
+- **YuNet atau Haar, bukan MediaPipe.** Alasan di #10. Detektor dipilih lewat `FACE_DETECTOR` (`auto` memakai YuNet bila modelnya terpasang).
 - **Satu event ASS per kata.** Jumlah event bertambah, tetapi tampilannya tidak bergantung pada versi libass.
 - **`yt-dlp` dipanggil sebagai proses**, bukan sebagai library, supaya bisa dibatalkan dengan andal (kill proses) dan crash-nya terisolasi.
 
@@ -76,7 +78,9 @@ Dicatat karena ini contoh kelas masalah yang akan muncul juga di kode asli bila 
 
 **Diuji dan lolos**
 
-- Engine video dengan **ffmpeg sungguhan**: kelima layout, caption, judul, 720p/1080p, loudnorm, pan face-track dengan keyframe, progres, pembatalan proses, ekstraksi frame.
+- Engine video dengan **ffmpeg sungguhan**: keenam layout (termasuk `duo`), caption, judul, 720p/1080p, loudnorm, pan face-track dengan keyframe, progres, pembatalan proses, ekstraksi frame.
+- **YuNet asli + ffmpeg pada video sintetis** (foto ditempel pada latar): satu orang (kamera diam saat goyangan kecil, mengikuti saat gerak besar), dua orang (dua jalur, caption di sambungan), dan fallback ke satu wajah bila hanya satu orang terlihat.
+- **FastAPI + TestClient asli** (`tests/test_http.py`, 6 test) lulus; 15 test handler via stub dijalankan terpisah dan lulus.
 - Pipeline analisis dan render end-to-end memakai yt-dlp palsu (data sintetis) dan Gemini palsu: fusi skor, snapping, cache, degradasi bertahap tanpa AI/heatmap/subtitle.
 - Job manager: sukses, gagal, batal saat berjalan (proses di-kill), batal saat antre, ulang, restart server.
 - Handler HTTP lewat stub FastAPI: validasi input, path traversal, ZIP/CSV, cookies (izin file 0600), guard Host/Origin, token, API key tidak masuk database.
@@ -89,8 +93,9 @@ Dicatat karena ini contoh kelas masalah yang akan muncul juga di kode asli bila 
 | Unduhan YouTube sungguhan (yt-dlp, `--download-sections`, subtitle json3, heatmap) | Tidak ada internet | Sedang: format output yt-dlp dan kebutuhan runtime JS sering berubah |
 | Panggilan Gemini sungguhan | Tidak ada internet | Rendah–sedang: skema respons mengikuti dokumentasi REST publik, diuji dengan HTTP palsu |
 | NVENC / encoder GPU lain | Tidak ada GPU | Rendah: deteksi memakai test-encode dan ada fallback CPU otomatis |
-| FastAPI asli (`tests/test_http.py`) | Paket tidak terpasang | Rendah–sedang: handler diuji lewat stub, bukan server asli; parameter `Header`/`Query` paling mungkin butuh penyesuaian |
-| Akurasi deteksi wajah pada footage nyata | Tidak ada video wajah | Sedang: Haar lemah pada wajah menyamping/tertutup. Bila wajah tidak stabil terdeteksi, renderer jatuh ke crop tengah dan memberi catatan |
+| Akurasi deteksi wajah pada footage nyata (YuNet maupun Haar) | Hanya video sintetis dan foto tempel, bukan rekaman wawancara | Sedang: pada layout `duo`, tetangga masih tampak sebagian di tepi panel (akibat crop 16:9 → 9:8). Bila wajah tidak stabil terdeteksi, renderer jatuh ke crop tengah atau Ikuti wajah dan memberi catatan |
+| Jalur Haar (OpenCV 4.x) | Sandbox memakai OpenCV 5.0, tanpa `CascadeClassifier`: 8 test yang butuh Haar dilewati | Rendah–sedang: jalur ini tidak berubah, tetapi tidak dijalankan ulang di sini |
+| Unduhan model YuNet sungguhan | Tidak ada internet ke GitHub media | Rendah: pengunduh diuji dengan jaringan palsu (checksum, ukuran, fallback URL); SHA-256 dan ukuran dicocokkan dengan pointer Git LFS repo opencv_zoo |
 | Windows, macOS, browser selain Chromium | Hanya Linux + Chromium | Sedang: escape path ffmpeg, `taskkill`, dan `run.bat` ditulis sesuai kaidah Windows dan divalidasi statis (label, escape, CRLF), tetapi belum pernah dijalankan di sana. Job `windows-latest` di CI disiapkan untuk menguji ini; test pengecekan proses via `/proc` otomatis dilewati di Windows |
 | Whisper (`faster-whisper`) | Tidak terpasang | Rendah: jalur opsional, impor terjaga |
 
@@ -98,5 +103,5 @@ Dicatat karena ini contoh kelas masalah yang akan muncul juga di kode asli bila 
 
 1. `python -m pip install -r requirements-dev.txt && python -m unittest discover -s tests -t .` di mesinmu, terutama `tests.test_http`.
 2. Jalankan satu video nyata dengan cookies dan key Gemini; periksa catatan di bawah strip bila ada fallback.
-3. Uji klip dengan satu pembicara dan dua pembicara; bila Haar kurang akurat, titik penggantian detektor hanya satu fungsi (`facetrack.detect_faces`).
-4. Ide lanjutan: pemilihan pembicara aktif (diarization / gerak bibir), b-roll otomatis, penjadwalan unggah.
+3. Pasang model YuNet (`python -m backend.models`), lalu uji klip satu pembicara dan dua pembicara (layout *Dua pembicara*).
+4. Ide lanjutan: pemilihan pembicara aktif (diarization / gerak bibir), b-roll otomatis, penjadwalan unggah. Daftar referensi dan ide yang belum dikerjakan: [`REFERENCES.md`](REFERENCES.md).

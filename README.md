@@ -55,8 +55,8 @@ Setelah terpasang, `FACE_DETECTOR=auto` (default) otomatis memakainya. Bila mode
 | Model Gemini | Daftar model diambil dari akunmu (bukan daftar tetap yang bisa basi), fallback otomatis saat kuota habis / model sibuk. |
 | Render | Antrean persisten (SQLite), progres real-time dari ffmpeg, bisa dibatalkan dan diulang, encoder GPU hanya dipakai bila *test-encode* nyata berhasil, jatuh ke CPU otomatis bila gagal di tengah. |
 | Caption | 10 gaya, kata aktif disorot dan "pop", baris dipecah otomatis, tag `[MUSIC]`/`(applause)` dibuang, opsi simpan `.srt`. |
-| Layout | Ikuti wajah, tengah, letterbox (blur/hitam; 16:9, 4:3, 1:1), split streamer, kamera mengambang. Preview 9:16 memakai rumus crop yang sama dengan renderer. |
-| Hasil | ZIP + **paket publikasi** (`.csv`: judul, hook, hashtag, waktu) dan tombol salin caption. |
+| Layout | Ikuti wajah, tengah, letterbox (blur/hitam; 16:9, 4:3, 1:1), split streamer, kamera mengambang, dan **dua pembicara** (dua panel ditumpuk, masing-masing mengikuti satu wajah, caption di sambungan; otomatis kembali ke Ikuti wajah bila dua wajah tak stabil terlihat bersamaan). Preview 9:16 memakai rumus crop yang sama dengan renderer. |
+| Hasil | ZIP + **paket publikasi** (`.csv`: judul, hook, hashtag, waktu, **kanal dan tautan video sumber**) dan tombol salin caption. Kanal YouTube sumber juga tampil di header video dan kartu antrean. |
 | Keamanan | Lihat bawah. |
 | UI | Strip film heatmap, studio, ID/EN, mobile, mode gelap. |
 
@@ -114,9 +114,9 @@ node --test tests/frontend.test.mjs            # logika frontend, i18n
 python -m tests.e2e.run_ui                     # UI di Chromium (pip install playwright && playwright install chromium)
 ```
 
-Status yang diverifikasi saat penyusunan: **106 test Python** (4 dilewati tanpa FastAPI asli), **19 test Node**, dan skrip UI E2E di Chromium (alur lengkap analisis → studio → render → unduh, ID/EN, mobile, nol error konsol). Render memakai ffmpeg sungguhan.
+Status yang diverifikasi saat penyusunan: **217 test Python** (23 dilewati di lingkungan penyusunan: 15 test handler yang hanya jalan dengan stub FastAPI, dijalankan terpisah dan lulus, serta 8 yang butuh OpenCV 4.x dengan Haar), **27 test Node**, dan skrip UI E2E di Chromium (alur lengkap analisis → studio → render → unduh, layout *Dua pembicara*, kredit kanal, ID/EN, mobile, nol error konsol). Render memakai ffmpeg sungguhan, dan face tracking diuji dengan YuNet asli pada video sintetis. `tests/test_http.py` dijalankan dengan FastAPI asli (6 test).
 
-**Belum diverifikasi** (tidak ada internet/GPU/FastAPI di lingkungan penyusunan): unduhan YouTube sungguhan lewat yt-dlp, panggilan Gemini sungguhan, encoder NVENC, `tests/test_http.py` (butuh FastAPI asli), akurasi deteksi wajah pada footage nyata, dan Windows. Handler HTTP dieksekusi lewat stub FastAPI, bukan server asli. Jalankan `python -m unittest tests.test_http` setelah `pip install -r requirements-dev.txt` untuk menutup celah terakhir.
+**Belum diverifikasi** (tidak ada internet/GPU di lingkungan penyusunan): unduhan YouTube sungguhan lewat yt-dlp, panggilan Gemini sungguhan, unduhan model YuNet dari GitHub (pengunduh hanya diuji dengan jaringan palsu), encoder NVENC, akurasi deteksi wajah pada footage wawancara nyata (hanya video sintetis), jalur Haar pada OpenCV 4.x, dan Windows.
 
 ## Troubleshooting
 
@@ -147,6 +147,7 @@ backend/
 frontend/               UI tanpa build (ES modules)
 tests/                  unit, integrasi, kontrak, E2E
 docs/ANALYSIS.md        analisis repo asli, keputusan desain, batas verifikasi
+docs/REFERENCES.md      proyek serupa yang dipelajari: apa yang diadopsi, apa yang tidak, lisensi, sumber
 ```
 
 ## Catatan hukum
